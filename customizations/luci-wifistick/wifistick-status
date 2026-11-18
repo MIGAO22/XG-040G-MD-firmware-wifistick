@@ -1,0 +1,43 @@
+#!/bin/sh
+# 随身WiFi(RNDIS) 状态采集，输出单行 JSON，供 LuCI 设置页轮询
+IF=eth2
+IFACE=wanusb
+
+auto=$(uci -q get network.$IFACE.auto); [ -n "$auto" ] || auto=1
+metric=$(uci -q get network.$IFACE.metric); [ -n "$metric" ] || metric=30
+
+present=false; [ -e /sys/class/net/$IF ] && present=true
+carrier=false
+if [ "$present" = true ]; then
+    [ "$(cat /sys/class/net/$IF/carrier 2>/dev/null)" = 1 ] && carrier=true
+fi
+
+usb_name="-"
+for d in /sys/bus/usb/devices/*/idVendor; do
+    if [ "$(cat $d 2>/dev/null)" = 19d2 ]; then
+        dd=$(dirname $d)
+        usb_name="$(cat $dd/manufacturer 2>/dev/null | tr -d '"') $(cat $dd/product 2>/dev/null | tr -d '"')"
+    fi
+done
+
+st=$(ubus call network.interface.$IFACE status 2>/dev/null)
+# RNDIS 的 operstate 恒为 unknown，链路是否在线以 netifd 接口 up 为准
+linked=false
+[ "$(echo "$st" | jsonfilter -e '@.up' 2>/dev/null)" = true ] && linked=true
+ip=$(echo "$st" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
+mask=$(echo "$st" | jsonfilter -e '@["ipv4-address"][0].mask' 2>/dev/null)
+gw=$(echo "$st" | jsonfilter -e '@.route[0].nexthop' 2>/dev/null)
+dns=$(echo "$st" | jsonfilter -e '@["dns-server"][*]' 2>/dev/null | tr '\n' ' ')
+up=$(echo "$st" | jsonfilter -e '@.uptime' 2>/dev/null)
+[ -n "$ip" ] || ip="-"
+[ -n "$gw" ] || gw="-"
+[ -n "$dns" ] || dns="-"
+[ -n "$up" ] || up=0
+
+ping_ok=false
+if [ "$linked" = true ]; then
+    ping -c 1 -W 3 -I $IF 223.5.5.5 >/dev/null 2>&1 && ping_ok=true
+fi
+
+printf '{"auto":%s,"metric":%s,"present":%s,"carrier":%s,"linked":%s,"ip":"%s","mask":%s,"gw":"%s","dns":"%s","uptime":%s,"ping_ok":%s,"usb_name":"%s"}\n' \
+    "$auto" "$metric" "$present" "$carrier" "$linked" "$ip" "${mask:-0}" "$gw" "$dns" "$up" "$ping_ok" "$usb_name"
