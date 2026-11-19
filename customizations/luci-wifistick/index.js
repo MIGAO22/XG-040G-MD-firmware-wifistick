@@ -50,6 +50,7 @@ function statusRows(d) {
 		row(_('网关'), d.gw && d.gw !== '-' ? d.gw : '-'),
 		row(_('DNS'), dns || '-'),
 		row(_('外网探测'), badge(!!d.ping_ok, _('通畅'), _('不通'))),
+		row(_('下载吞吐(采样)'), '%s KB/s'.format(d.speed)),
 		row(_('本次在线'), fmtUptime(d.uptime)),
 		row(_('接口跃点'), '%s'.format(d.metric)),
 		row(_('开机自启'), badge(d.auto == 1, _('开'), _('关')))

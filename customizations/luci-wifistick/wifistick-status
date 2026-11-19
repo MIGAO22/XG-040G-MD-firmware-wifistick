@@ -39,5 +39,12 @@ if [ "$linked" = true ]; then
     ping -c 1 -W 3 -I $IF 223.5.5.5 >/dev/null 2>&1 && ping_ok=true
 fi
 
-printf '{"auto":%s,"metric":%s,"present":%s,"carrier":%s,"linked":%s,"ip":"%s","mask":%s,"gw":"%s","dns":"%s","uptime":%s,"ping_ok":%s,"usb_name":"%s"}\n' \
-    "$auto" "$metric" "$present" "$carrier" "$linked" "$ip" "${mask:-0}" "$gw" "$dns" "$up" "$ping_ok" "$usb_name"
+# 下载吞吐采样(约3秒截断)，单位 KB/s
+speed=0
+if [ "$linked" = true ]; then
+    sz=$(timeout 3 wget -q -O - http://mirrors.aliyun.com/ubuntu/ls-lR.gz 2>/dev/null | wc -c)
+    speed=$((sz/3/1024))
+fi
+
+printf '{"auto":%s,"metric":%s,"present":%s,"carrier":%s,"linked":%s,"ip":"%s","mask":%s,"gw":"%s","dns":"%s","uptime":%s,"ping_ok":%s,"speed":%s,"usb_name":"%s"}\n' \
+    "$auto" "$metric" "$present" "$carrier" "$linked" "$ip" "${mask:-0}" "$gw" "$dns" "$up" "$ping_ok" "$speed" "$usb_name"
