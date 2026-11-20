@@ -1,0 +1,69 @@
+From: MIGAO22 <MIGAO22@users.noreply.github.com>
+Subject: [PATCH] rndis_host: enable RX aggregation for ZTE 19d2:0581
+
+The ZTE 19d2:0581 portable-WiFi stick only enables proper RNDIS packet
+batching when the host advertises a receive limit above 2048 bytes.
+With the default 2048-byte rx_urb_size it emits malformed frames:
+rx_length_errors/rx_frame_errors climb faster than rx_packets and
+download throughput collapses to ~1 KB/s while small packets pass.
+
+Backport the RX aggregation quirk from upstream commit
+f688218baa71 ("rndis_host: enable RX aggregation for OnePlus Nord CE 2")
+and apply it to this stick, keeping the ZTE destination-MAC fixup.
+
+--- a/drivers/net/usb/rndis_host.c
++++ b/drivers/net/usb/rndis_host.c
+@@ -345,6 +345,11 @@
+ 
+ 	dev->rx_urb_size = dev->hard_mtu + (dev->maxpacket + 1);
+ 	dev->rx_urb_size &= ~(dev->maxpacket - 1);
++
++	/* some devices require a receive limit above 2048 for RX aggregation */
++	if (dev->driver_info->data & RNDIS_DRIVER_DATA_RX_AGGREGATION)
++		dev->rx_urb_size = max_t(size_t, dev->rx_urb_size, 64 * 1024);
++
+ 	u.init->max_transfer_size = cpu_to_le32(dev->rx_urb_size);
+ 
+ 	net->netdev_ops = &rndis_netdev_ops;
+@@ -634,6 +639,19 @@
+ 	.tx_fixup =	rndis_tx_fixup,
+ };
+ 
++
++static const struct driver_info	zte_rndis_rx_aggregation_info = {
++	.description =	"ZTE RNDIS device (RX aggregation)",
++	.flags =	FLAG_ETHER | FLAG_POINTTOPOINT | FLAG_FRAMING_RN | FLAG_NO_SETINT,
++	.data =		RNDIS_DRIVER_DATA_DST_MAC_FIXUP |
++			RNDIS_DRIVER_DATA_RX_AGGREGATION,
++	.bind =		zte_rndis_bind,
++	.unbind =	rndis_unbind,
++	.status =	rndis_status,
++	.rx_fixup =	rndis_rx_fixup,
++	.tx_fixup =	rndis_tx_fixup,
++};
++
+ /*-------------------------------------------------------------------------*/
+ 
+ static const struct usb_device_id	products [] = {
+@@ -648,6 +666,11 @@
+ 				      USB_CLASS_COMM, 2 /* ACM */, 0x0ff),
+ 	.driver_info = (unsigned long)&rndis_info,
+ }, {
++	/* ZTE 19d2:0581 portable WiFi stick (needs RX limit > 2048) */
++	USB_DEVICE_AND_INTERFACE_INFO(0x19d2, 0x0581,
++				      USB_CLASS_COMM, 2 /* ACM */, 0x0ff),
++	.driver_info = (unsigned long)&zte_rndis_rx_aggregation_info,
++}, {
+ 	/* ZTE WWAN modules */
+ 	USB_VENDOR_AND_INTERFACE_INFO(0x19d2,
+ 				      USB_CLASS_WIRELESS_CONTROLLER, 1, 3),
+--- a/include/linux/usb/rndis_host.h
++++ b/include/linux/usb/rndis_host.h
+@@ -184,6 +184,7 @@
+ /* Flags for driver_info::data */
+ #define RNDIS_DRIVER_DATA_POLL_STATUS	1	/* poll status before control */
+ #define RNDIS_DRIVER_DATA_DST_MAC_FIXUP	2	/* device ignores configured MAC address */
++#define RNDIS_DRIVER_DATA_RX_AGGREGATION	4	/* needs RX limit > 2048 */
+ 
+ extern void rndis_status(struct usbnet *dev, struct urb *urb);
+ extern int

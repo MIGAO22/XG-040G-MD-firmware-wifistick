@@ -5,11 +5,31 @@
 ## 固件
 
 - 文件：`firmware/openwrt-airoha-an7581-bell_xg-040g-md-squashfs-sysupgrade.bin`
-- SHA256：`7faeafdac4853bb372e31cbcf2ac870d012a606e3db547646da5c1dee6ce929a`（见 `firmware/sha256sums.txt`）
+- SHA256：`9bd6afd8e002e8c7eb4b106584f0fe5516e2e300f19e97e3b14df23abec886ff`（见 `firmware/sha256sums.txt`）
 - 设备：XG-040G-MD（Airoha AN7581，2.5G 以太网 OpenWrt，放弃光口）
-- 来源：xiangtailiang/openwrt 分支 openwrt-25.12，钉定源码 commit `0b821bb42f693b556e3e14e9f50f1f497fef98e4`（=稳定版 2026.11.10-030347 基线），经 fork MIGAO22/OpenWrt-for-XG-040G-MD 的 Actions run 44322443261 构建，发布 tag `2026.11.19-021059`
-- 内核：6.12.113；关键差异：内置 `kmod-usb-net-rndis`（USB 随身WiFi 直插直用，ZTE 19d2:0581 识别为 eth2）
-- 状态：已在设备上运行，随身WiFi RNDIS 拨号上网 + NAT + 重启持久化验证通过
+- 来源：xiangtailiang/openwrt 分支 openwrt-25.12，钉定源码 commit `0b821bb42f693b556e3e14e9f50f1f497fef98e4`（=稳定版 2026.11.10-030347 基线），经 fork MIGAO22/OpenWrt-for-XG-040G-MD 的 Actions run 44643813866 构建（fork commit `d4cacc8`），发布 tag `2026.11.20-111615`
+- 内核：6.12.113；关键差异：内置 `kmod-usb-net-rndis`（ZTE 19d2:0581 识别为 eth2）+ **782 补丁：RNDIS RX 聚合上限 64KiB**（修复随身WiFi 下载极慢，见下节）
+- 状态：镜像已校验存档；设备当前运行 2026.11.19 旧镜像 + 热替换的同款 64KiB 模块（效果等同，刷本镜像可整体固化）
+- 上一版（无聚合补丁，下载 1–35KB/s）：tag `2026.11.19-021059`，sha `7faeafda…`，见 git 历史
+
+## RNDIS 下载慢修复（64KiB RX 聚合）
+
+根因：内核 `generic_rndis_bind` 通告 max_transfer_size=2048，ZTE 19d2:0581 棒在该上限下不启用正常聚合、发畸形帧（rx_length_errors 占 ~98%），下载仅 1–35KB/s。修复=上游 f688218baa71 机制 backport + 19d2:0581 专用 driver_info，聚合上限提到 **64KiB**（16KiB 实测仍 ~52% 错帧；64KiB 实测 235–632KB/s，接近棒直插 PC 的 ~788KB/s 上限）。
+
+- 补丁：`rndis-fix/782-usb-net-rndis-zte-0581-rx-aggregation.patch`（放 `target/linux/generic/pending-6.12/`，**不能放 patches-6.12**，quilt.mk 守卫会直接报错退出）
+- 模块：`rndis-fix/rndis_host-6.12.113-rx-agg64k.ko`（sha `0d17d701…`，vermagic `6.12.113 SMP mod_unload aarch64`，与在跑固件内核一致可免刷机热装）
+
+免刷机热装（ssh root@192.168.1.1，二进制必须原样 cat 传输，**禁用 tr -d '\r'**）：
+
+```sh
+ifdown wanusb; ifconfig eth2 down
+echo "3-1:1.0" > /sys/bus/usb/drivers/rndis_host/unbind
+rmmod rndis_host
+cp rndis_host-6.12.113-rx-agg64k.ko /lib/modules/6.12.113/rndis_host.ko
+modprobe rndis_host; ifup wanusb
+```
+
+回滚：旧模块备份在设备 `/etc/rndis-rollback/rndis_host.ko.orig`，同样流程换回即可。
 
 ## 刷机方法
 

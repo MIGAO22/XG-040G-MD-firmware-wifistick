@@ -1,1 +1,1 @@
-7faeafdac4853bb372e31cbcf2ac870d012a606e3db547646da5c1dee6ce929a *openwrt-airoha-an7581-bell_xg-040g-md-squashfs-sysupgrade.bin
+9bd6afd8e002e8c7eb4b106584f0fe5516e2e300f19e97e3b14df23abec886ff *openwrt-airoha-an7581-bell_xg-040g-md-squashfs-sysupgrade.bin

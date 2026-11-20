@@ -1,0 +1,3 @@
+*.patch -text
+*.ko -text
+*.bin -text
