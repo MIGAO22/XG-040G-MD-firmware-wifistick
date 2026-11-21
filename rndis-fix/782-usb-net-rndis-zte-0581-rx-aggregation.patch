@@ -1,5 +1,5 @@
 From: MIGAO22 <MIGAO22@users.noreply.github.com>
-Subject: [PATCH] rndis_host: enable RX aggregation for ZTE 19d2:0581
+Subject: [PATCH] rndis_host: tunable RX aggregation for ZTE 19d2:0581
 
 The ZTE 19d2:0581 portable-WiFi stick only enables proper RNDIS packet
 batching when the host advertises a receive limit above 2048 bytes.
@@ -11,25 +11,43 @@ Backport the RX aggregation quirk from upstream commit
 f688218baa71 ("rndis_host: enable RX aggregation for OnePlus Nord CE 2")
 and apply it to this stick, keeping the ZTE destination-MAC fixup.
 
+The aggregation limit is exposed as module parameter rx_agg_kib
+(default 64, writable at runtime; 0 keeps the original 2048-byte
+limit).  Measured on this stick: 16 KiB still leaves ~50% malformed
+frames, 64 KiB is clean and fast, 128 KiB stops RX entirely.  The
+new value takes effect on the next bind (replug or driver rebind).
+
 --- a/drivers/net/usb/rndis_host.c
 +++ b/drivers/net/usb/rndis_host.c
-@@ -345,6 +345,11 @@
+@@ -17,6 +17,10 @@
+ #include <linux/overflow.h>
+ 
+ 
++static int rx_agg_kib = 64;
++module_param(rx_agg_kib, int, 0644);
++MODULE_PARM_DESC(rx_agg_kib, "RX aggregation limit in KiB for devices with the RX_AGGREGATION quirk (0 = keep the default 2048-byte limit)");
++
+ /*
+  * RNDIS is NDIS remoted over USB.  It's a MSFT variant of CDC ACM ... of
+  * course ACM was intended for modems, not Ethernet links!  USB's standard
+@@ -345,6 +349,13 @@
  
  	dev->rx_urb_size = dev->hard_mtu + (dev->maxpacket + 1);
  	dev->rx_urb_size &= ~(dev->maxpacket - 1);
 +
 +	/* some devices require a receive limit above 2048 for RX aggregation */
-+	if (dev->driver_info->data & RNDIS_DRIVER_DATA_RX_AGGREGATION)
-+		dev->rx_urb_size = max_t(size_t, dev->rx_urb_size, 64 * 1024);
++	if ((dev->driver_info->data & RNDIS_DRIVER_DATA_RX_AGGREGATION) &&
++	    rx_agg_kib > 0)
++		dev->rx_urb_size = max_t(size_t, dev->rx_urb_size,
++					 rx_agg_kib * 1024);
 +
  	u.init->max_transfer_size = cpu_to_le32(dev->rx_urb_size);
  
  	net->netdev_ops = &rndis_netdev_ops;
-@@ -634,6 +639,19 @@
+@@ -634,6 +645,18 @@
  	.tx_fixup =	rndis_tx_fixup,
  };
  
-+
 +static const struct driver_info	zte_rndis_rx_aggregation_info = {
 +	.description =	"ZTE RNDIS device (RX aggregation)",
 +	.flags =	FLAG_ETHER | FLAG_POINTTOPOINT | FLAG_FRAMING_RN | FLAG_NO_SETINT,
@@ -45,7 +63,7 @@ and apply it to this stick, keeping the ZTE destination-MAC fixup.
  /*-------------------------------------------------------------------------*/
  
  static const struct usb_device_id	products [] = {
-@@ -648,6 +666,11 @@
+@@ -648,6 +671,11 @@
  				      USB_CLASS_COMM, 2 /* ACM */, 0x0ff),
  	.driver_info = (unsigned long)&rndis_info,
  }, {

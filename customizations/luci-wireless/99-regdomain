@@ -1,0 +1,5 @@
+#!/bin/sh
+# apply configured regulatory country when a phy appears (ucode wifi lacks iw reg set)
+[ "$ACTION" = "add" ] || exit 0
+country=$(uci -q get wireless.radio0.country)
+[ -n "$country" ] && iw reg set "$country"

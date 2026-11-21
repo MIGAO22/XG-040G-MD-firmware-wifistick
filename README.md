@@ -4,20 +4,20 @@
 
 ## 固件
 
-- 文件：`firmware/openwrt-airoha-an7581-bell_xg-040g-md-squashfs-sysupgrade.bin`
-- SHA256：`9bd6afd8e002e8c7eb4b106584f0fe5516e2e300f19e97e3b14df23abec886ff`（见 `firmware/sha256sums.txt`）
-- 设备：XG-040G-MD（Airoha AN7581，2.5G 以太网 OpenWrt，放弃光口）
-- 来源：xiangtailiang/openwrt 分支 openwrt-25.12，钉定源码 commit `0b821bb42f693b556e3e14e9f50f1f497fef98e4`（=稳定版 2026.11.10-030347 基线），经 fork MIGAO22/OpenWrt-for-XG-040G-MD 的 Actions run 44643813866 构建（fork commit `d4cacc8`），发布 tag `2026.11.20-111615`
-- 内核：6.12.113；关键差异：内置 `kmod-usb-net-rndis`（ZTE 19d2:0581 识别为 eth2）+ **782 补丁：RNDIS RX 聚合上限 64KiB**（修复随身WiFi 下载极慢，见下节）
-- 状态：镜像已校验存档；设备当前运行 2026.11.19 旧镜像 + 热替换的同款 64KiB 模块（效果等同，刷本镜像可整体固化）
-- 上一版（无聚合补丁，下载 1–35KB/s）：tag `2026.11.19-021059`，sha `7faeafda…`，见 git 历史
+**当前在跑**：USB WiFi AP 版（含 RT3573 无线 + v2 聚合参数补丁）
+
+- SHA256：`22044c3192f3a93c4dcd1aed5b6b7ebfc846a1cbca1ffaf6d4a2e656ee62eac0`（50247947B，本地存档 `wifi-fix/release/`）
+- 来源：fork 发布 tag `2026.11.20-235516`（Actions run12，fork commit `82b3b3b`），源码基线仍钉定 `0b821bb…`（kernel 6.12.113，未升级 OpenWrt）
+- 相比上一版新增：`kmod-rt2800-usb`+`rt2870.bin` 固件+`wpad-basic-mbedtls`+`iw`+`iwinfo`（USB WiFi 网卡 AP）；782 补丁 v2（`rx_agg_kib` 模块参数，默认 64）
+
+上一版：64KiB 聚合镜像 `firmware/openwrt-airoha-an7581-bell_xg-040g-md-squashfs-sysupgrade.bin`，SHA256 `9bd6afd8…`（tag `2026.11.20-111615`，run 44643813866，fork commit `d4cacc8`）；再上一版（无聚合补丁，下载 1–35KB/s）：tag `2026.11.19-021059`，sha `7faeafda…`，见 git 历史
 
 ## RNDIS 下载慢修复（64KiB RX 聚合）
 
 根因：内核 `generic_rndis_bind` 通告 max_transfer_size=2048，ZTE 19d2:0581 棒在该上限下不启用正常聚合、发畸形帧（rx_length_errors 占 ~98%），下载仅 1–35KB/s。修复=上游 f688218baa71 机制 backport + 19d2:0581 专用 driver_info，聚合上限提到 **64KiB**（16KiB 实测仍 ~52% 错帧；64KiB 实测 235–632KB/s，接近棒直插 PC 的 ~788KB/s 上限）。
 
-- 补丁：`rndis-fix/782-usb-net-rndis-zte-0581-rx-aggregation.patch`（放 `target/linux/generic/pending-6.12/`，**不能放 patches-6.12**，quilt.mk 守卫会直接报错退出）
-- 模块：`rndis-fix/rndis_host-6.12.113-rx-agg64k.ko`（sha `0d17d701…`，vermagic `6.12.113 SMP mod_unload aarch64`，与在跑固件内核一致可免刷机热装）
+- 补丁：`rndis-fix/782-usb-net-rndis-zte-0581-rx-aggregation.patch` **v2**（sha `ce3910fc…`；新增 `rx_agg_kib` 模块参数 0644 可运行时调整，默认 64，0=原版 2048。放 `target/linux/generic/pending-6.12/`，**不能放 patches-6.12**，quilt.mk 守卫会直接报错退出）
+- 模块：`rndis-fix/rndis_host-6.12.113-rx-agg-param.ko`（v2 参数版，sha `e1ae9c52…`，已在跑固件内置）；`rndis-fix/rndis_host-6.12.113-rx-agg64k.ko`（v1 定稿 64KiB，sha `0d17d701…`，vermagic `6.12.113 SMP mod_unload aarch64`，可免刷机热装）
 
 免刷机热装（ssh root@192.168.1.1，二进制必须原样 cat 传输，**禁用 tr -d '\r'**）：
 
@@ -47,17 +47,31 @@ sysupgrade -n firmware/openwrt-airoha-an7581-bell_xg-040g-md-squashfs-sysupgrade
 ./scripts/deploy-customizations.sh 192.168.1.1
 ```
 
-包含两组定制：
+包含三组定制：
 
-1. **随身WiFi LuCI 页面**（`customizations/luci-wifistick/`）：网络菜单下"随身WiFi"设置页，实时状态卡（设备/链路/IP/网关/DNS/外网探测/在线时长）+ 开机自启开关 + 接口跃点 + MAC 覆盖。
+1. **随身WiFi LuCI 页面**（`customizations/luci-wifistick/`）：网络菜单下"随身WiFi"设置页，实时状态卡（设备/链路/IP/网关/DNS/外网探测/在线时长）+ 接收聚合上限下拉（0/16/32/64/128 KiB）+ 开机自启开关 + 接口跃点 + MAC 覆盖。
    - `wifistick-status` → `/usr/libexec/wifistick-status`（755）
+   - `wifistick-agg` → `/usr/libexec/wifistick-agg`（755）；`wifistick-agg.init` → `/etc/init.d/wifistick-agg`（755，需 `enable`）
    - `luci-app-wifistick.json` → `/usr/share/rpcd/acl.d/`
    - `luci-app-wifistick.menu.json` → `/usr/share/luci/menu.d/luci-app-wifistick.json`
-   - `index.js` → `/www/luci-static/resources/view/wifistick/index.js`
+   - `index.js` → `/www/luci-static/resources/view/wifistick/index.js`（**目录刷机后不存在，脚本已自动 mkdir**）
 2. **NPU 硬件转发概览**（`customizations/npu/`）：
    - `npu-status.sh` → `/usr/libexec/npu-status`（755）
    - `15_hardware_forwarding.js` → `/www/luci-static/resources/view/status/include/`
    - `luci-mod-status-index.json` → `/usr/share/rpcd/acl.d/`
+3. **无线信道策略**（`customizations/luci-wireless/`，2026-11-21 新增）：
+   - `wireless.js` → `/www/luci-static/resources/view/network/wireless.js`：给 radio 编辑表单-高级标签加两个开关——**自动避开 DFS 信道**（映射 `wireless.radioX.acs_exclude_dfs`）与 **仅用 5.8G 高速率频段**（映射 `wireless.radioX.chanlist='149 153 157 161'`，hostapd 真限制而非加权）
+   - `version.uc` → `/usr/share/ucode/luci/version.uc`：revision 追加 `-xg1` 后缀。**坑：LuCI 资源 URL 的 `?v=` 用硬编码包版本，改 JS 文件后浏览器缓存不失效，必须同时 bump 这个版本号**（或无痕窗口验证）
+   - `99-regdomain` → `/etc/hotplug.d/ieee80211/99-regdomain`（755）：phy 出现时按 `wireless.radio0.country` 执行 `iw reg set`。**坑：25.12 的 ucode 无线脚本不执行 iw reg set，config 里 country 不生效，内核一直停在 world(00)；且 UM 不在内核 regdb（无效代码），5.8G 在 world 域是 no-IR 不可用 AP——必须 country=US（或 CN）**
+   - 配套 uci（脚本自动设置）：`wireless.radio0.country=US`、`acs_exclude_dfs=1`、`chanlist='149 153 157 161'`
+
+## USB WiFi 网卡 AP（EDUP EW-7733UnD / RT3573）要点
+
+- 固件已内置驱动栈（kmod-rt2800-usb + rt2870.bin + wpad-basic-mbedtls + iwinfo）；LuCI 网络→无线直接配 SSID/加密。
+- **channel auto 是抛硬币**：ACS 可能选中 5.6G DFS 信道，rt2800 无雷达检测硬件 → `start_dfs_cac() failed` → AP-DISABLED（手机搜不到 SSID）。解法=开"自动避开 DFS"（或固定非 DFS 信道）；绕过 DFS 检测发射违反无线电法规，**不做**。
+- 实测最终态：5.8G ch149 HT40（ACS 在 149/153/157/161 内自选），hostapd txpower 仍为 radio 配置值（默认 13dBm，可调高）。
+- 重启连锁坑：ZTE 棒热重启枚举失败（error -110）需拔插；两设备同抢光猫 5V 时 RT3573 也可能掉线重枚举（phy 号会变 phy0→phy1，配置按 USB path 匹配不受影响）。
+- 无线配置快照：`backups/wireless-uci-20261121.txt`（含 SSID/口令，仓库保持私有）。
 
 ## 网络配置要点（已含在配置备份里）
 
