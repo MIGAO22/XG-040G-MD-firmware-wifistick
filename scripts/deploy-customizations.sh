@@ -43,6 +43,23 @@ $SSH 'if uci -q get wireless.radio0.type >/dev/null; then
 	wifi reload
 fi'
 
+echo "==> USB 设备概览卡（随身WiFi + USB无线网卡）"
+push "$ROOT/customizations/usb-overview/usb-devices-status" /usr/libexec/usb-devices-status 755
+push "$ROOT/customizations/usb-overview/16_usb_devices.js" /www/luci-static/resources/view/status/include/16_usb_devices.js
+
+echo "==> 指示灯绑定：随身WiFi→上网灯(闪烁) USB无线网卡→注册灯(常亮)"
+# SSID 为 kk 的接口固定命名 wifik，灯与状态卡都按这个名字跟踪
+$SSH 'idx=$(uci show wireless 2>/dev/null | sed -n "s/^wireless\.@wifi-iface\[\([0-9]*\)\]\.ssid=.kk.$/\1/p" | head -1)
+if [ -n "$idx" ] && [ "$(uci -q get wireless.@wifi-iface[$idx].ifname)" != wifik ]; then
+	uci set wireless.@wifi-iface[$idx].ifname=wifik
+	uci commit wireless
+	wifi reload
+fi'
+push "$ROOT/customizations/usb-leds/usb-leds" /etc/init.d/usb-leds 755
+# 本内核 /etc/init.d/led 的 netdev 新版接口静默失效，删掉 uci led 条目只留自管脚本
+$SSH 'uci -q del system.@led[1]; uci -q del system.@led[0]; uci commit system
+/etc/init.d/usb-leds enable; /etc/init.d/usb-leds start'
+
 echo "==> 生效: 重启 rpcd/uhttpd、清 LuCI 缓存"
 $SSH '/etc/init.d/rpcd restart; /etc/init.d/uhttpd restart; rm -f /tmp/luci-indexcache*; rm -rf /tmp/luci-modulecache/*'
 

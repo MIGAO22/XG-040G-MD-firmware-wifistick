@@ -47,7 +47,7 @@ sysupgrade -n firmware/openwrt-airoha-an7581-bell_xg-040g-md-squashfs-sysupgrade
 ./scripts/deploy-customizations.sh 192.168.1.1
 ```
 
-包含三组定制：
+包含五组定制：
 
 1. **随身WiFi LuCI 页面**（`customizations/luci-wifistick/`）：网络菜单下"随身WiFi"设置页，实时状态卡（设备/链路/IP/网关/DNS/外网探测/在线时长）+ 接收聚合上限下拉（0/16/32/64/128 KiB）+ 开机自启开关 + 接口跃点 + MAC 覆盖。
    - `wifistick-status` → `/usr/libexec/wifistick-status`（755）
@@ -63,7 +63,15 @@ sysupgrade -n firmware/openwrt-airoha-an7581-bell_xg-040g-md-squashfs-sysupgrade
    - `wireless.js` → `/www/luci-static/resources/view/network/wireless.js`：给 radio 编辑表单-高级标签加两个开关——**自动避开 DFS 信道**（映射 `wireless.radioX.acs_exclude_dfs`）与 **仅用 5.8G 高速率频段**（映射 `wireless.radioX.chanlist='149 153 157 161'`，hostapd 真限制而非加权）
    - `version.uc` → `/usr/share/ucode/luci/version.uc`：revision 追加 `-xg1` 后缀。**坑：LuCI 资源 URL 的 `?v=` 用硬编码包版本，改 JS 文件后浏览器缓存不失效，必须同时 bump 这个版本号**（或无痕窗口验证）
    - `99-regdomain` → `/etc/hotplug.d/ieee80211/99-regdomain`（755）：phy 出现时按 `wireless.radio0.country` 执行 `iw reg set`。**坑：25.12 的 ucode 无线脚本不执行 iw reg set，config 里 country 不生效，内核一直停在 world(00)；且 UM 不在内核 regdb（无效代码），5.8G 在 world 域是 no-IR 不可用 AP——必须 country=US（或 CN）**
-   - 配套 uci（脚本自动设置）：`wireless.radio0.country=US`、`acs_exclude_dfs=1`、`chanlist='149 153 157 161'`
+   - 配套 uci（脚本自动设置）：`wireless.radio0.country=US`、`acs_exclude_dfs=1`、`chanlist='149 153 157 161'`；SSID=kk 的接口固定 `ifname=wifik`（灯与状态卡按此名跟踪，phy 重编号不受影响）
+4. **USB 设备概览卡**（`customizations/usb-overview/`，2026-11-21 新增）：状态→概览显示"USB 设备状态"卡——随身WiFi（插入/连通/IP/运行时长/收发流量/错帧/聚合上限）与 USB 无线网卡（驱动/开关/SSID/信道/客户端/功率/流量），随概览自动刷新。
+   - `usb-devices-status` → `/usr/libexec/usb-devices-status`（755，单行 JSON）
+   - `16_usb_devices.js` → `/www/luci-static/resources/view/status/include/`
+   - ACL 在 `customizations/npu/luci-mod-status-index.json` 里加了 `usb-devices-status` exec 授权
+   - 坑：`ubus call iwinfo info` 返回的 txpower 已是 dBm（不是 ×100）；本设备 ucode 版 iwinfo 不支持 `-J`，客户端数用 `iwinfo <if> assoclist` 行数
+5. **指示灯绑定**（`customizations/usb-leds/`，2026-11-21 新增）：面板 USB-1/USB-2 灯硬件不亮（原生 dts 把它们接在 gpio34/35 并经 usbport 触发器驱动，但本内核没编 `LEDS_TRIGGER_USBPORT`，且 fork dts 已把 34/35 挪作 LAN 灯引脚）。改用面板灯代替：**上网灯**(`green:internet`)←随身WiFi eth2（连通常亮+收发闪烁），**注册灯**(`green:pon`)←USB 无线网卡 wifik（热点开启常亮）；红色光信号灯不动。
+   - `usb-leds` → `/etc/init.d/usb-leds`（755，需 `enable`）
+   - 坑：6.12 内核 netdev 触发器只有旧版 sysfs 接口（`device_name`+`link`/`tx`/`rx`），OpenWrt `/etc/init.d/led` 写新版 `device`/`mode` 文件会静默失败——所以 uci `system.@led` 条目已删除，由脚本直接绑定
 
 ## USB WiFi 网卡 AP（EDUP EW-7733UnD / RT3573）要点
 
