@@ -1,0 +1,59 @@
+#!/bin/sh
+# 随身WiFi RNDIS 接收聚合上限调节: wifistick-agg get | set <kib>
+# 依赖 v2 补丁的模块参数 rx_agg_kib；旧模块无此参数时返回 supported=false
+PARAM=/sys/module/rndis_host/parameters/rx_agg_kib
+DRVDIR=/sys/bus/usb/drivers/rndis_host
+IFACE=wanusb
+
+saved=$(uci -q get wifistick.global.agg_kib); [ -n "$saved" ] || saved=64
+
+bound_list() {
+    # 只列真正的 RNDIS 控制接口（有 net 子目录）；CDC 数据接口随主接口自动 claim，不能单独 rebind
+    for d in "$DRVDIR"/*:*; do
+        [ -d "$d/net" ] || continue
+        basename "$d"
+    done
+}
+
+link_up() {
+    [ "$(ubus call network.interface.$IFACE status 2>/dev/null | jsonfilter -e '@.up' 2>/dev/null)" = true ]
+}
+
+case "$1" in
+get)
+    if [ -r "$PARAM" ]; then
+        cur=$(cat "$PARAM")
+        printf '{"supported":true,"current":%s,"saved":%s,"bound":"%s"}\n' "$cur" "$saved" "$(bound_list | tr '\n' ' ')"
+    else
+        printf '{"supported":false,"current":-1,"saved":%s,"bound":""}\n' "$saved"
+    fi
+    ;;
+set)
+    kib=$2
+    case "$kib" in 0|16|32|64|128) ;; *) echo '{"ok":false,"reason":"bad_value"}'; exit 1;; esac
+    if [ ! -w "$PARAM" ]; then echo '{"ok":false,"reason":"unsupported"}'; exit 1; fi
+    # uci 无法凭空创建配置文件，先落一个最小骨架
+    if [ ! -f /etc/config/wifistick ]; then
+        printf "config wifistick 'global'\n\toption agg_kib '64'\n" > /etc/config/wifistick
+    fi
+    uci set wifistick.global.agg_kib="$kib"
+    uci commit wifistick
+    echo "$kib" > "$PARAM"
+    devs=$(bound_list)
+    up=false
+    if [ -n "$devs" ]; then
+        for n in $devs; do echo "$n" > "$DRVDIR/unbind"; done
+        sleep 1
+        for n in $devs; do echo "$n" > "$DRVDIR/bind" 2>/dev/null; done
+        ifup $IFACE >/dev/null 2>&1
+        i=0
+        while [ $i -lt 25 ]; do
+            if link_up; then up=true; break; fi
+            sleep 1; i=$((i+1))
+        done
+    fi
+    printf '{"ok":true,"applied":%s,"rebound":"%s","link_up":%s}\n' "$kib" "$(echo $devs | tr '\n' ' ')" "$up"
+    ;;
+*)
+    echo '{"ok":false,"reason":"usage"}'; exit 1;;
+esac

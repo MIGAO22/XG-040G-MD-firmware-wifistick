@@ -1,0 +1,13 @@
+{
+	"admin/network/wifistick": {
+		"title": "随身WiFi",
+		"order": 95,
+		"action": {
+			"type": "view",
+			"path": "wifistick/index"
+		},
+		"depends": {
+			"acl": [ "luci-app-wifistick" ]
+		}
+	}
+}

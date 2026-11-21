@@ -1,0 +1,12 @@
+#!/bin/sh /etc/rc.common
+# 开机把持久化的聚合上限写回模块参数并重绑随身WiFi（与默认值相同则不动）
+START=95
+
+start() {
+    saved=$(uci -q get wifistick.global.agg_kib)
+    [ -n "$saved" ] || return 0
+    p=/sys/module/rndis_host/parameters/rx_agg_kib
+    [ -w "$p" ] || return 0
+    [ "$(cat $p)" = "$saved" ] && return 0
+    /usr/libexec/wifistick-agg set "$saved" >/dev/null 2>&1
+}

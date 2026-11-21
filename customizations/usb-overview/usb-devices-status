@@ -1,0 +1,62 @@
+#!/bin/sh
+# 概览页 USB 设备状态采集（轻量、无网络请求），输出单行 JSON
+# 随身WiFi棒(ZTE 19d2:0581 RNDIS) + USB无线网卡(EDUP RT3573 AP)
+
+clean() { printf '%s' "$1" | tr -d '"\\' | tr '\n' ' '; }
+
+# ---------- 随身WiFi ----------
+stick_present=false; stick_name="-"; stick_net=""
+for vd in /sys/bus/usb/devices/*/idVendor; do
+	d=$(dirname "$vd")
+	if [ "$(cat "$vd" 2>/dev/null)" = "19d2" ] && [ "$(cat "$d/idProduct" 2>/dev/null)" = "0581" ]; then
+		stick_present=true
+		stick_name="$(cat "$d/manufacturer" 2>/dev/null) $(cat "$d/product" 2>/dev/null)"
+		for n in "$d"/*/net/*; do [ -d "$n" ] && stick_net=$(basename "$n"); done
+	fi
+done
+stick_link=false; stick_ip="-"; stick_up=0
+st=$(ubus call network.interface.wanusb status 2>/dev/null)
+[ "$(echo "$st" | jsonfilter -e '@.up' 2>/dev/null)" = true ] && stick_link=true
+stick_ip=$(echo "$st" | jsonfilter -e '@["ipv4-address"][0].address' 2>/dev/null)
+[ -n "$stick_ip" ] || stick_ip="-"
+stick_up=$(echo "$st" | jsonfilter -e '@.uptime' 2>/dev/null); [ -n "$stick_up" ] || stick_up=0
+srx=0; stx=0; srxe=0
+if [ -n "$stick_net" ]; then
+	srx=$(cat /sys/class/net/$stick_net/statistics/rx_bytes 2>/dev/null); [ -n "$srx" ] || srx=0
+	stx=$(cat /sys/class/net/$stick_net/statistics/tx_bytes 2>/dev/null); [ -n "$stx" ] || stx=0
+	srxe=$(cat /sys/class/net/$stick_net/statistics/rx_errors 2>/dev/null); [ -n "$srxe" ] || srxe=0
+fi
+agg=$(cat /sys/module/rndis_host/parameters/rx_agg_kib 2>/dev/null); [ -n "$agg" ] || agg=-1
+
+# ---------- USB 无线网卡 ----------
+wifi_present=false; wifi_name="-"; wifi_phy=""; wifi_if=""
+for vd in /sys/bus/usb/devices/*/idVendor; do
+	d=$(dirname "$vd")
+	if [ "$(cat "$vd" 2>/dev/null)" = "148f" ] && [ "$(cat "$d/idProduct" 2>/dev/null)" = "3573" ]; then
+		wifi_present=true
+		wifi_name="$(cat "$d/manufacturer" 2>/dev/null) $(cat "$d/product" 2>/dev/null)"
+		for p in "$d"/ieee80211/* "$d"/*/ieee80211/*; do [ -d "$p" ] && wifi_phy=$(basename "$p"); done
+	fi
+done
+if [ -n "$wifi_phy" ]; then
+	for n in /sys/class/net/*/phy80211; do
+		[ "$(basename "$(readlink -f "$n" 2>/dev/null)" 2>/dev/null)" = "$wifi_phy" ] && wifi_if=$(basename "$(dirname "$n")")
+	done
+fi
+wifi_on=false; wifi_ssid="-"; wifi_ch=0; wifi_ht="-"; wifi_txp=0; wcli=0; wrx=0; wtx=0
+if [ -n "$wifi_if" ]; then
+	iw=$(ubus call iwinfo info "{\"device\":\"$wifi_if\"}" 2>/dev/null)
+	[ "$(echo "$iw" | jsonfilter -e '@.mode' 2>/dev/null)" = "Master" ] && wifi_on=true
+	wifi_ssid=$(echo "$iw" | jsonfilter -e '@.ssid' 2>/dev/null); [ -n "$wifi_ssid" ] || wifi_ssid="-"
+	wifi_ch=$(echo "$iw" | jsonfilter -e '@.channel' 2>/dev/null); [ -n "$wifi_ch" ] || wifi_ch=0
+	wifi_ht=$(echo "$iw" | jsonfilter -e '@.htmode' 2>/dev/null); [ -n "$wifi_ht" ] || wifi_ht="-"
+	wifi_txp=$(echo "$iw" | jsonfilter -e '@.txpower' 2>/dev/null); [ -n "$wifi_txp" ] || wifi_txp=0
+	wrx=$(cat /sys/class/net/$wifi_if/statistics/rx_bytes 2>/dev/null); [ -n "$wrx" ] || wrx=0
+	wtx=$(cat /sys/class/net/$wifi_if/statistics/tx_bytes 2>/dev/null); [ -n "$wtx" ] || wtx=0
+	wcli=$(iwinfo "$wifi_if" assoclist 2>/dev/null | grep -cE '^[0-9A-Fa-f]{2}(:[0-9A-Fa-f]{2}){5}')
+	[ -n "$wcli" ] || wcli=0
+fi
+
+printf '{"stick":{"present":%s,"name":"%s","net":"%s","link":%s,"ip":"%s","uptime":%s,"rx":%s,"tx":%s,"rxerr":%s,"agg":%s},"wifi":{"present":%s,"name":"%s","if":"%s","phy":"%s","on":%s,"ssid":"%s","channel":%s,"ht":"%s","txpower":%s,"clients":%s,"rx":%s,"tx":%s}}\n' \
+	"$stick_present" "$(clean "$stick_name")" "${stick_net:--}" "$stick_link" "$stick_ip" "$stick_up" "$srx" "$stx" "$srxe" "$agg" \
+	"$wifi_present" "$(clean "$wifi_name")" "${wifi_if:--}" "${wifi_phy:--}" "$wifi_on" "$(clean "$wifi_ssid")" "$wifi_ch" "$(clean "$wifi_ht")" "$wifi_txp" "$wcli" "$wrx" "$wtx"

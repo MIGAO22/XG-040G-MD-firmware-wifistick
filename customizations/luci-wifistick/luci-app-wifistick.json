@@ -1,0 +1,15 @@
+{
+	"luci-app-wifistick": {
+		"description": "Grant access to USB stick (RNDIS) status page",
+		"read": {
+			"file": {
+				"/usr/libexec/wifistick-status": [ "exec" ],
+				"/usr/libexec/wifistick-agg": [ "exec" ]
+			},
+			"ubus": {
+				"file": [ "exec" ]
+			},
+			"uci": [ "network" ]
+		}
+	}
+}
