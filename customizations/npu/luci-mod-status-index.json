@@ -7,7 +7,8 @@
 				"/proc/sys/net/netfilter/nf_conntrack_count": [ "read" ],
 				"/proc/sys/net/netfilter/nf_conntrack_max": [ "read" ],
 				"/www/luci-static/resources/view/status/include": [ "list" ],
-				"/usr/libexec/npu-status": [ "exec" ]
+				"/usr/libexec/npu-status": [ "exec" ],
+				"/usr/libexec/usb-devices-status": [ "exec" ]
 			},
 			"ubus": {
 				"luci": [ "getVersion", "getUnixtime", "getOdhcp6cStats" ],
