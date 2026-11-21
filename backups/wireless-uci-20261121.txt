@@ -19,6 +19,6 @@ wireless.default_radio0.encryption='sae-mixed'
 wireless.default_radio0.disabled='0'
 wireless.default_radio0.key='kawasaki'
 wireless.default_radio0.ocv='0'
-
-wifistick.global=wifistick
-wifistick.global.agg_kib='64'
+wireless.default_radio0.ifname='wifik'
+---
+system.ntp.enabled='1'
